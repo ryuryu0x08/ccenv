@@ -13,11 +13,11 @@ func main() {
 	// name and launch, passing through the rest. Everything else (reserved
 	// subcommands, bare invocation, --help) goes through cobra.
 	if len(args) > 0 && !cmd.IsReserved(args[0]) && args[0] != "" && args[0][0] != '-' {
-		if err := cmd.RunLaunch(args[0], args[1:]); err != nil {
+		code, err := cmd.RunLaunch(args[0], args[1:])
+		if err != nil {
 			fmt.Fprintln(os.Stderr, "ccenv:", err)
-			os.Exit(1)
 		}
-		return
+		os.Exit(code)
 	}
 	if err := cmd.NewRoot().Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "ccenv:", err)

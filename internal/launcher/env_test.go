@@ -42,9 +42,27 @@ func TestBuildEnvPlanEmpty(t *testing.T) {
 	}
 }
 
-func TestBuildEnvPartial(t *testing.T) {
+func TestBuildEnvOfficialAPIKey(t *testing.T) {
+	// No base_url => official endpoint => x-api-key via ANTHROPIC_API_KEY.
 	env := BuildEnv(profile.Profile{AuthToken: "k"})
-	if len(env) != 1 || env[0] != "ANTHROPIC_AUTH_TOKEN=k" {
-		t.Errorf("api profile should inject only token, got %v", env)
+	if len(env) != 1 || env[0] != "ANTHROPIC_API_KEY=k" {
+		t.Errorf("official API profile should inject ANTHROPIC_API_KEY only, got %v", env)
+	}
+}
+
+func TestBuildEnvCustomEndpointBearer(t *testing.T) {
+	// base_url set => custom endpoint => Bearer via ANTHROPIC_AUTH_TOKEN.
+	env := BuildEnv(profile.Profile{BaseURL: "http://x", AuthToken: "k"})
+	foundBearer := false
+	for _, e := range env {
+		if e == "ANTHROPIC_AUTH_TOKEN=k" {
+			foundBearer = true
+		}
+		if e == "ANTHROPIC_API_KEY=k" {
+			t.Errorf("custom endpoint must not set ANTHROPIC_API_KEY, got %v", env)
+		}
+	}
+	if !foundBearer {
+		t.Errorf("custom endpoint should set ANTHROPIC_AUTH_TOKEN, got %v", env)
 	}
 }

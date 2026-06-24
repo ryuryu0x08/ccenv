@@ -15,7 +15,13 @@ func BuildEnv(p profile.Profile) []string {
 		env = append(env, "ANTHROPIC_BASE_URL="+p.BaseURL)
 	}
 	if p.AuthToken != "" {
-		env = append(env, "ANTHROPIC_AUTH_TOKEN="+p.AuthToken)
+		// Custom endpoint (base_url set) uses a Bearer token; the official
+		// endpoint (base_url empty) uses the console API key (x-api-key).
+		if p.BaseURL != "" {
+			env = append(env, "ANTHROPIC_AUTH_TOKEN="+p.AuthToken)
+		} else {
+			env = append(env, "ANTHROPIC_API_KEY="+p.AuthToken)
+		}
 	}
 	if p.Model != "" {
 		env = append(env,
