@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -23,6 +24,9 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	if got.Profiles["local"].BaseURL != "http://127.0.0.1:11434" {
 		t.Errorf("base_url lost: %+v", got.Profiles["local"])
 	}
+	if got.Profiles["local"].AutoCompactWindow != 1000 {
+		t.Errorf("auto_compact_window lost: got %d", got.Profiles["local"].AutoCompactWindow)
+	}
 	if _, ok := got.Profiles["plan"]; !ok {
 		t.Errorf("empty profile lost")
 	}
@@ -40,7 +44,7 @@ func TestLoadMissingReturnsEmpty(t *testing.T) {
 
 func TestLoadCorruptErrors(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "bad.toml")
-	if err := writeFile(p, "this is = = not toml ["); err != nil {
+	if err := os.WriteFile(p, []byte("this is = = not toml ["), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Load(p); err == nil {

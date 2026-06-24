@@ -94,7 +94,3 @@ func (c *Config) Names() []string {
 	sort.Strings(names)
 	return names
 }
-
-func writeFile(path, content string) error {
-	return os.WriteFile(path, []byte(content), 0o600)
-}
