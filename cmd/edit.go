@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
+	"ccenv/internal/config"
 	"ccenv/internal/profile"
 	"github.com/AlecAivazis/survey/v2"
 	"github.com/spf13/cobra"
@@ -22,7 +24,7 @@ func newEditCmd() *cobra.Command {
 			}
 			cur, ok := c.Get(name)
 			if !ok {
-				return fmt.Errorf("profile %q does not exist (available: %s)", name, strings.Join(c.Names(), ", "))
+				return profileNotFoundErr(name, c)
 			}
 
 			fields := []string{"base_url", "auth_token", "models_url + model", "compact_window"}
@@ -31,7 +33,7 @@ func newEditCmd() *cobra.Command {
 				Message: "选择要修改的字段 (空格选中，回车提交):",
 				Options: fields,
 			}, &pick); err != nil {
-				return err
+				return fmt.Errorf("prompt fields to edit: %w", err)
 			}
 
 			updated, err := editFields(cur, pick)
@@ -39,8 +41,8 @@ func newEditCmd() *cobra.Command {
 				return err
 			}
 			c.Set(name, updated)
-			if err := saveConfig(path, c); err != nil {
-				return err
+			if err := config.Save(path, c); err != nil {
+				return fmt.Errorf("save profile %q: %w", name, err)
 			}
 			fmt.Printf("Updated profile %q\n", name)
 			return nil
@@ -58,12 +60,12 @@ func editFields(cur profile.Profile, pick []string) (profile.Profile, error) {
 	}
 	if sel["base_url"] {
 		if err := survey.AskOne(&survey.Input{Message: "Base URL:", Default: p.BaseURL}, &p.BaseURL); err != nil {
-			return p, err
+			return p, fmt.Errorf("prompt base url: %w", err)
 		}
 	}
 	if sel["auth_token"] {
 		if err := survey.AskOne(&survey.Input{Message: "Auth token:", Default: p.AuthToken}, &p.AuthToken); err != nil {
-			return p, err
+			return p, fmt.Errorf("prompt auth token: %w", err)
 		}
 	}
 	if sel["models_url + model"] {
@@ -79,11 +81,18 @@ func editFields(cur profile.Profile, pick []string) (profile.Profile, error) {
 			Message: "Auto compact window (绝对 token 数，留空/0=不注入):",
 			Default: fmt.Sprintf("%d", p.AutoCompactWindow),
 		}, &s); err != nil {
-			return p, err
+			return p, fmt.Errorf("prompt compact window: %w", err)
 		}
-		n := 0
-		fmt.Sscanf(s, "%d", &n)
-		p.AutoCompactWindow = n
+		s = strings.TrimSpace(s)
+		if s == "" {
+			p.AutoCompactWindow = 0
+		} else {
+			n, err := strconv.Atoi(s)
+			if err != nil {
+				return p, fmt.Errorf("invalid compact window %q: %w", s, err)
+			}
+			p.AutoCompactWindow = n
+		}
 	}
 	return p, nil
 }

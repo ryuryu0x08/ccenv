@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"strings"
 
 	"ccenv/internal/launcher"
 )
@@ -16,7 +15,11 @@ func RunLaunch(name string, extraArgs []string) (int, error) {
 	}
 	p, ok := c.Get(name)
 	if !ok {
-		return 1, fmt.Errorf("profile %q does not exist (available: %s)", name, strings.Join(c.Names(), ", "))
+		return 1, profileNotFoundErr(name, c)
 	}
-	return launcher.Launch(p, extraArgs)
+	code, err := launcher.Launch(p, extraArgs)
+	if err != nil {
+		return code, fmt.Errorf("launch profile %q: %w", name, err)
+	}
+	return code, nil
 }

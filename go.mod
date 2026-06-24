@@ -1,6 +1,6 @@
 module ccenv
 
-go 1.22.6
+go 1.25.4
 
 require (
 	github.com/AlecAivazis/survey/v2 v2.3.7 // indirect

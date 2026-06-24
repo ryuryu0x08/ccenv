@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 
+	"ccenv/internal/config"
 	"ccenv/internal/profile"
 	"github.com/spf13/cobra"
 )
@@ -14,7 +15,7 @@ func newAddCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
-			if IsReserved(name) {
+			if IsReservedIn(NewRoot(), name) {
 				return fmt.Errorf("%q is a reserved word; choose another profile name", name)
 			}
 			c, path, err := loadConfig()
@@ -26,11 +27,11 @@ func newAddCmd() *cobra.Command {
 			}
 			p, err := promptProfile(profile.Profile{})
 			if err != nil {
-				return err
+				return fmt.Errorf("prompt profile %q: %w", name, err)
 			}
 			c.Set(name, p)
-			if err := saveConfig(path, c); err != nil {
-				return err
+			if err := config.Save(path, c); err != nil {
+				return fmt.Errorf("save profile %q: %w", name, err)
 			}
 			fmt.Printf("Created profile %q\n", name)
 			return nil

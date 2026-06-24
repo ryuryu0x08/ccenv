@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"ccenv/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -21,8 +22,8 @@ func newRmCmd() *cobra.Command {
 			if err := c.Remove(name); err != nil {
 				return fmt.Errorf("%w (available: %s)", err, strings.Join(c.Names(), ", "))
 			}
-			if err := saveConfig(path, c); err != nil {
-				return err
+			if err := config.Save(path, c); err != nil {
+				return fmt.Errorf("save after removing %q: %w", name, err)
 			}
 			fmt.Printf("Removed profile %q\n", name)
 			return nil

@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"math"
 	"strconv"
 
 	"ccenv/internal/models"
@@ -18,15 +17,25 @@ func promptProfile(cur profile.Profile) (profile.Profile, error) {
 		Message: "Base URL (留空=官方默认 api.anthropic.com):",
 		Default: p.BaseURL,
 	}, &p.BaseURL); err != nil {
-		return p, err
+		return p, fmt.Errorf("prompt base url: %w", err)
 	}
 	if err := survey.AskOne(&survey.Input{
 		Message: "Auth token / API key (留空=不注入，用于官方 plan):",
 		Default: p.AuthToken,
 	}, &p.AuthToken); err != nil {
-		return p, err
+		return p, fmt.Errorf("prompt auth token: %w", err)
 	}
 	return promptModelSection(p)
+}
+
+// promptManualModel asks for a model name by hand (used when there's no models
+// API or the fetch failed) and disables the auto-compact window.
+func promptManualModel(p profile.Profile) (profile.Profile, error) {
+	p.AutoCompactWindow = 0
+	if err := survey.AskOne(&survey.Input{Message: "模型名 (留空=不注入模型):", Default: p.Model}, &p.Model); err != nil {
+		return p, fmt.Errorf("prompt model name: %w", err)
+	}
+	return p, nil
 }
 
 // promptModelSection asks whether there's a /v1/models API, then either fetches
@@ -38,26 +47,22 @@ func promptModelSection(p profile.Profile) (profile.Profile, error) {
 		Message: "该 endpoint 是否支持 OpenAI 兼容的 /v1/models 接口? (仅支持 OpenAI 格式，官方 Anthropic 不支持)",
 		Default: hasAPI,
 	}, &hasAPI); err != nil {
-		return p, err
+		return p, fmt.Errorf("prompt models api support: %w", err)
 	}
 	if !hasAPI {
 		p.ModelsURL = ""
-		p.AutoCompactWindow = 0
-		err := survey.AskOne(&survey.Input{Message: "模型名 (留空=不注入模型):", Default: p.Model}, &p.Model)
-		return p, err
+		return promptManualModel(p)
 	}
 	if err := survey.AskOne(&survey.Input{
 		Message: "Models URL (完整 /v1/models 地址):",
 		Default: p.ModelsURL,
 	}, &p.ModelsURL); err != nil {
-		return p, err
+		return p, fmt.Errorf("prompt models url: %w", err)
 	}
 	list, err := models.Fetch(p.ModelsURL, p.AuthToken)
 	if err != nil {
 		fmt.Printf("拉取模型失败 (%v)，降级为手动填写模型名。\n", err)
-		p.AutoCompactWindow = 0
-		err := survey.AskOne(&survey.Input{Message: "模型名 (留空=不注入模型):", Default: p.Model}, &p.Model)
-		return p, err
+		return promptManualModel(p)
 	}
 	opts := make([]string, len(list))
 	ctxByLabel := map[string]int{}
@@ -71,19 +76,19 @@ func promptModelSection(p profile.Profile) (profile.Profile, error) {
 	}
 	var chosen string
 	if err := survey.AskOne(&survey.Select{Message: "选择默认模型:", Options: opts}, &chosen); err != nil {
-		return p, err
+		return p, fmt.Errorf("prompt model selection: %w", err)
 	}
 	p.Model = list[indexOf(opts, chosen)].ID
 	if ctx := ctxByLabel[chosen]; ctx > 0 {
-		pctStr := "80"
-		if err := survey.AskOne(&survey.Input{Message: "压缩窗口比例 (%，默认 80):", Default: "80"}, &pctStr); err != nil {
-			return p, err
+		pctStr := fmt.Sprintf("%g", profile.DefaultCompactRatioPercent)
+		if err := survey.AskOne(&survey.Input{Message: "压缩窗口比例 (%，默认 80):", Default: pctStr}, &pctStr); err != nil {
+			return p, fmt.Errorf("prompt compact ratio: %w", err)
 		}
 		pct, perr := strconv.ParseFloat(pctStr, 64)
 		if perr != nil || pct <= 0 {
-			pct = 80
+			pct = profile.DefaultCompactRatioPercent
 		}
-		p.AutoCompactWindow = int(math.Round(float64(ctx) * pct / 100.0))
+		p.AutoCompactWindow = profile.CompactWindow(ctx, pct)
 	} else {
 		p.AutoCompactWindow = 0
 	}
