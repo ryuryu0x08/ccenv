@@ -27,7 +27,7 @@ func newEditCmd() *cobra.Command {
 				return profileNotFoundErr(name, c)
 			}
 
-			fields := []string{"base_url", "auth_token", "models_url + model", "compact_window"}
+			fields := []string{"base_url", "auth_token", "models_url", "model", "compact_window"}
 			var pick []string
 			if err := survey.AskOne(&survey.MultiSelect{
 				Message: "选择要修改的字段 (空格选中，回车提交):",
@@ -68,8 +68,15 @@ func editFields(cur profile.Profile, pick []string) (profile.Profile, error) {
 			return p, fmt.Errorf("prompt auth token: %w", err)
 		}
 	}
-	if sel["models_url + model"] {
-		np, err := promptModelSection(p)
+	if sel["models_url"] {
+		np, err := promptModelsURL(p)
+		if err != nil {
+			return p, err
+		}
+		p = np
+	}
+	if sel["model"] {
+		np, err := promptModel(p)
 		if err != nil {
 			return p, err
 		}

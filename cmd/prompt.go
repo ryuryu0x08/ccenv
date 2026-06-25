@@ -114,10 +114,23 @@ func modelIDFromLabel(label string) string {
 	return label
 }
 
-// promptModelSection asks whether there's a /v1/models API, then either fetches
-// and selects a model (computing the compact window) or takes a manual model
-// name. Shared by add (full flow) and edit (model-only).
+// manualEntryLabel is the trailing Select option that drops to free-text model
+// entry when a models list is available but the desired model isn't listed.
+const manualEntryLabel = "[手动输入模型名]"
+
+// promptModelSection is the full add-flow model step: configure the models URL
+// then choose the model.
 func promptModelSection(p profile.Profile) (profile.Profile, error) {
+	p, err := promptModelsURL(p)
+	if err != nil {
+		return p, err
+	}
+	return promptModel(p)
+}
+
+// promptModelsURL toggles and edits the OpenAI-compatible /v1/models endpoint.
+// Declining clears ModelsURL; it does not touch Model.
+func promptModelsURL(p profile.Profile) (profile.Profile, error) {
 	hasAPI := p.ModelsURL != ""
 	if err := survey.AskOne(&survey.Confirm{
 		Message: "该 endpoint 是否支持 OpenAI 兼容的 /v1/models 接口? (仅支持 OpenAI 格式，官方 Anthropic 不支持)",
@@ -127,7 +140,7 @@ func promptModelSection(p profile.Profile) (profile.Profile, error) {
 	}
 	if !hasAPI {
 		p.ModelsURL = ""
-		return promptManualModel(p)
+		return p, nil
 	}
 	if err := survey.AskOne(&survey.Input{
 		Message: "Models URL (完整 /v1/models 地址):",
@@ -135,11 +148,45 @@ func promptModelSection(p profile.Profile) (profile.Profile, error) {
 	}, &p.ModelsURL); err != nil {
 		return p, fmt.Errorf("prompt models url: %w", err)
 	}
+	return p, nil
+}
+
+// promptModel selects the main model (and per-tier overrides). With a reachable
+// ModelsURL it offers the fetched list plus a trailing manual-entry option;
+// otherwise (no URL / fetch failed / manual chosen) it falls back to free text.
+func promptModel(p profile.Profile) (profile.Profile, error) {
+	if p.ModelsURL == "" {
+		return promptManualModel(p)
+	}
 	list, err := models.Fetch(p.ModelsURL, p.AuthToken)
 	if err != nil {
 		fmt.Printf("拉取模型失败 (%v)，降级为手动填写模型名。\n", err)
 		return promptManualModel(p)
 	}
+	opts, ctxByLabel := modelOptions(list)
+	choices := append(append([]string{}, opts...), manualEntryLabel)
+	var chosen string
+	if err := survey.AskOne(&survey.Select{
+		Message: "选择默认模型 (最后一项可手动输入):",
+		Options: choices,
+		Default: labelForModel(opts, p.Model),
+	}, &chosen); err != nil {
+		return p, fmt.Errorf("prompt model selection: %w", err)
+	}
+	if chosen == manualEntryLabel {
+		return promptManualModel(p)
+	}
+	p.Model = modelIDFromLabel(chosen)
+	np, err := promptCompactFromCtx(p, ctxByLabel[chosen])
+	if err != nil {
+		return p, err
+	}
+	return promptTierModels(np, opts)
+}
+
+// modelOptions builds Select labels (id with optional " (ctx=N)" suffix) and a
+// label→context-length lookup from a fetched model list.
+func modelOptions(list []models.Model) ([]string, map[string]int) {
 	opts := make([]string, len(list))
 	ctxByLabel := map[string]int{}
 	for i, m := range list {
@@ -150,32 +197,37 @@ func promptModelSection(p profile.Profile) (profile.Profile, error) {
 		opts[i] = label
 		ctxByLabel[label] = m.ContextLength
 	}
-	var chosen string
-	if err := survey.AskOne(&survey.Select{Message: "选择默认模型:", Options: opts}, &chosen); err != nil {
-		return p, fmt.Errorf("prompt model selection: %w", err)
-	}
-	p.Model = list[indexOf(opts, chosen)].ID
-	if ctx := ctxByLabel[chosen]; ctx > 0 {
-		pctStr := fmt.Sprintf("%g", profile.DefaultCompactRatioPercent)
-		if err := survey.AskOne(&survey.Input{Message: "压缩窗口比例 (%，默认 80):", Default: pctStr}, &pctStr); err != nil {
-			return p, fmt.Errorf("prompt compact ratio: %w", err)
-		}
-		pct, perr := strconv.ParseFloat(pctStr, 64)
-		if perr != nil || pct <= 0 {
-			pct = profile.DefaultCompactRatioPercent
-		}
-		p.AutoCompactWindow = profile.CompactWindow(ctx, pct)
-	} else {
-		p.AutoCompactWindow = 0
-	}
-	return promptTierModels(p, opts)
+	return opts, ctxByLabel
 }
 
-func indexOf(s []string, v string) int {
-	for i, x := range s {
-		if x == v {
-			return i
+// labelForModel finds the option label matching model id `cur`, or "" if absent.
+func labelForModel(opts []string, cur string) string {
+	if cur == "" {
+		return ""
+	}
+	for _, o := range opts {
+		if modelIDFromLabel(o) == cur {
+			return o
 		}
 	}
-	return 0
+	return ""
+}
+
+// promptCompactFromCtx derives the auto-compact window from a model context
+// length: zero ctx disables it, otherwise the user picks a percentage.
+func promptCompactFromCtx(p profile.Profile, ctx int) (profile.Profile, error) {
+	if ctx <= 0 {
+		p.AutoCompactWindow = 0
+		return p, nil
+	}
+	pctStr := fmt.Sprintf("%g", profile.DefaultCompactRatioPercent)
+	if err := survey.AskOne(&survey.Input{Message: "压缩窗口比例 (%，默认 80):", Default: pctStr}, &pctStr); err != nil {
+		return p, fmt.Errorf("prompt compact ratio: %w", err)
+	}
+	pct, perr := strconv.ParseFloat(pctStr, 64)
+	if perr != nil || pct <= 0 {
+		pct = profile.DefaultCompactRatioPercent
+	}
+	p.AutoCompactWindow = profile.CompactWindow(ctx, pct)
+	return p, nil
 }
