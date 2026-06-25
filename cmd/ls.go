@@ -45,6 +45,18 @@ func runLs() error {
 		fmt.Printf("  %-12s base=%s\n", n, base)
 		fmt.Printf("               token=%s model=%s models_url=%v compact=%d\n",
 			mask(p.AuthToken), p.Model, p.ModelsURL != "", p.AutoCompactWindow)
+		if p.HasTierModels() {
+			fmt.Printf("               tiers: haiku=%s sonnet=%s opus=%s\n",
+				tierOrFallback(p.HaikuModel), tierOrFallback(p.SonnetModel), tierOrFallback(p.OpusModel))
+		}
 	}
 	return nil
+}
+
+// tierOrFallback shows a tier model, or "(main)" when it falls back to Model.
+func tierOrFallback(m string) string {
+	if m == "" {
+		return "(main)"
+	}
+	return m
 }

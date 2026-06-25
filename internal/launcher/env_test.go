@@ -66,3 +66,69 @@ func TestBuildEnvCustomEndpointBearer(t *testing.T) {
 		t.Errorf("custom endpoint should set ANTHROPIC_AUTH_TOKEN, got %v", env)
 	}
 }
+
+func hasPrefix(env []string, key string) bool {
+	for _, e := range env {
+		if len(e) >= len(key) && e[:len(key)] == key {
+			return true
+		}
+	}
+	return false
+}
+
+func TestBuildEnvTierModelsAllSet(t *testing.T) {
+	// All three tiers set => no ANTHROPIC_MODEL, each tier uses its own value.
+	p := profile.Profile{
+		Model:       "main",
+		HaikuModel:  "h1",
+		SonnetModel: "s1",
+		OpusModel:   "o1",
+	}
+	env := BuildEnv(p)
+	if hasPrefix(env, "ANTHROPIC_MODEL=") {
+		t.Errorf("tier mode must NOT inject ANTHROPIC_MODEL, got %v", env)
+	}
+	for _, want := range []string{
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL=h1",
+		"ANTHROPIC_DEFAULT_SONNET_MODEL=s1",
+		"ANTHROPIC_DEFAULT_OPUS_MODEL=o1",
+	} {
+		if !has(env, want) {
+			t.Errorf("missing %q in %v", want, env)
+		}
+	}
+}
+
+func TestBuildEnvTierModelsPartialFallback(t *testing.T) {
+	// Only sonnet overridden => haiku & opus fall back to Model; still no ANTHROPIC_MODEL.
+	p := profile.Profile{
+		Model:       "main",
+		SonnetModel: "s1",
+	}
+	env := BuildEnv(p)
+	if hasPrefix(env, "ANTHROPIC_MODEL=") {
+		t.Errorf("tier mode must NOT inject ANTHROPIC_MODEL, got %v", env)
+	}
+	for _, want := range []string{
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL=main",
+		"ANTHROPIC_DEFAULT_SONNET_MODEL=s1",
+		"ANTHROPIC_DEFAULT_OPUS_MODEL=main",
+	} {
+		if !has(env, want) {
+			t.Errorf("missing %q in %v", want, env)
+		}
+	}
+}
+
+func TestBuildEnvTierModelsNoMainFallback(t *testing.T) {
+	// Tier set but Model empty => only the explicitly-set tier is injected;
+	// tiers without an override and without a Model fallback emit nothing.
+	p := profile.Profile{HaikuModel: "h1"}
+	env := BuildEnv(p)
+	if !has(env, "ANTHROPIC_DEFAULT_HAIKU_MODEL=h1") {
+		t.Errorf("expected haiku tier, got %v", env)
+	}
+	if hasPrefix(env, "ANTHROPIC_DEFAULT_SONNET_MODEL=") || hasPrefix(env, "ANTHROPIC_DEFAULT_OPUS_MODEL=") {
+		t.Errorf("tiers without override and no Model fallback must not be injected, got %v", env)
+	}
+}

@@ -11,6 +11,18 @@ type Profile struct {
 	ModelsURL         string `toml:"models_url,omitempty"`
 	Model             string `toml:"model,omitempty"`
 	AutoCompactWindow int    `toml:"auto_compact_window,omitempty"`
+
+	// Per-tier model overrides. Empty means that tier falls back to Model.
+	// Setting any of these switches injection to per-tier mode (ANTHROPIC_MODEL
+	// is then NOT injected, because it would override the per-tier variables).
+	HaikuModel  string `toml:"haiku_model,omitempty"`
+	SonnetModel string `toml:"sonnet_model,omitempty"`
+	OpusModel   string `toml:"opus_model,omitempty"`
+}
+
+// HasTierModels reports whether any per-tier model override is set.
+func (p Profile) HasTierModels() bool {
+	return p.HaikuModel != "" || p.SonnetModel != "" || p.OpusModel != ""
 }
 
 // DefaultCompactRatioPercent is the default auto-compact window as a percentage
