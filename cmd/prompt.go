@@ -165,12 +165,14 @@ func promptModel(p profile.Profile) (profile.Profile, error) {
 	}
 	opts, ctxByLabel := modelOptions(list)
 	choices := append(append([]string{}, opts...), manualEntryLabel)
+	sel := &survey.Select{Message: "选择默认模型 (最后一项可手动输入):", Options: choices}
+	// survey rejects a Default that isn't one of Options (an empty string
+	// included), so only set it when the current model maps to a listed label.
+	if def := labelForModel(opts, p.Model); def != "" {
+		sel.Default = def
+	}
 	var chosen string
-	if err := survey.AskOne(&survey.Select{
-		Message: "选择默认模型 (最后一项可手动输入):",
-		Options: choices,
-		Default: labelForModel(opts, p.Model),
-	}, &chosen); err != nil {
+	if err := survey.AskOne(sel, &chosen); err != nil {
 		return p, fmt.Errorf("prompt model selection: %w", err)
 	}
 	if chosen == manualEntryLabel {
