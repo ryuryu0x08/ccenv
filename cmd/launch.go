@@ -17,7 +17,7 @@ func RunLaunch(name string, extraArgs []string) (int, error) {
 	if !ok {
 		return 1, profileNotFoundErr(name, c)
 	}
-	code, err := launcher.Launch(p, extraArgs)
+	code, err := launcher.Launch(name, p, extraArgs)
 	if err != nil {
 		return code, fmt.Errorf("launch profile %q: %w", name, err)
 	}

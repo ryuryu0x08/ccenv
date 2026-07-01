@@ -61,3 +61,63 @@ func TestYoloCorruptErrors(t *testing.T) {
 		t.Error("expected error on corrupt json")
 	}
 }
+
+func TestMaterializeProviderSettingsAppliesEnvAndPreservesOthers(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "settings.json")
+	dst := filepath.Join(t.TempDir(), "mirror", "settings.json")
+	os.WriteFile(src, []byte(`{
+		"theme": "dark",
+		"env": {
+			"ANTHROPIC_BASE_URL": "https://stale.example",
+			"ANTHROPIC_AUTH_TOKEN": "stale-token",
+			"SOME_OTHER_VAR": "keep-me"
+		}
+	}`), 0o600)
+
+	env := map[string]string{"ANTHROPIC_BASE_URL": "http://127.0.0.1:11434"}
+	managed := []string{"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"}
+	if err := MaterializeProviderSettings(src, dst, env, managed); err != nil {
+		t.Fatal(err)
+	}
+
+	m := read(t, dst)
+	if m["theme"] != "dark" {
+		t.Errorf("lost non-env key: %v", m)
+	}
+	envBlock, _ := m["env"].(map[string]any)
+	if envBlock["ANTHROPIC_BASE_URL"] != "http://127.0.0.1:11434" {
+		t.Errorf("base url not overridden: %v", envBlock)
+	}
+	if _, ok := envBlock["ANTHROPIC_AUTH_TOKEN"]; ok {
+		t.Errorf("stale managed key not cleared (profile doesn't set it): %v", envBlock)
+	}
+	if envBlock["SOME_OTHER_VAR"] != "keep-me" {
+		t.Errorf("lost unmanaged env key: %v", envBlock)
+	}
+}
+
+func TestMaterializeProviderSettingsMissingSrcTreatedEmpty(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "nope.json")
+	dst := filepath.Join(t.TempDir(), "settings.json")
+	env := map[string]string{"ANTHROPIC_MODEL": "m1"}
+	if err := MaterializeProviderSettings(src, dst, env, []string{"ANTHROPIC_MODEL"}); err != nil {
+		t.Fatal(err)
+	}
+	m := read(t, dst)
+	envBlock, _ := m["env"].(map[string]any)
+	if envBlock["ANTHROPIC_MODEL"] != "m1" {
+		t.Errorf("expected model in fresh env block: %v", m)
+	}
+}
+
+func TestMaterializeProviderSettingsCorruptSrcErrors(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "settings.json")
+	dst := filepath.Join(t.TempDir(), "mirror", "settings.json")
+	os.WriteFile(src, []byte(`{ broken`), 0o600)
+	if err := MaterializeProviderSettings(src, dst, nil, nil); err == nil {
+		t.Error("expected error on corrupt src json")
+	}
+	if _, err := os.Stat(dst); err == nil {
+		t.Error("dst should not be written when src is corrupt")
+	}
+}

@@ -75,19 +75,57 @@ auth_token = "sk-ant-xxx"
 `ccenv <name> [args...]`：
 
 1. 从 config.toml 读取 name profile，不存在 → 报错并列出可用 profile。
-2. 在**当前进程环境基础上追加/覆盖**以下变量（不清空已有 env）：
-
-| profile 字段非空 | 注入的环境变量 |
-|------|------|
-| `base_url` | `ANTHROPIC_BASE_URL=<base_url>` |
-| `auth_token` | `ANTHROPIC_AUTH_TOKEN=<auth_token>` |
-| `model` | `ANTHROPIC_MODEL` + `ANTHROPIC_DEFAULT_HAIKU_MODEL` + `ANTHROPIC_DEFAULT_SONNET_MODEL` + `ANTHROPIC_DEFAULT_OPUS_MODEL`（全设为该模型，复刻 localclaude） |
-| `auto_compact_window` | `CLAUDE_CODE_AUTO_COMPACT_WINDOW=<值>` |
-| 全空（plan profile） | 不注入任何变量 |
-
+2. 计算该 profile 要注入的变量（`profile.EnvMap()`，见 §4.1 的字段对照表）。
+   **不直接把这些变量塞进启动 claude 的进程环境**——而是准备
+   `~/.ccenv/claudehome/<name>/` 作为该 profile 专属的 `CLAUDE_CONFIG_DIR`（见
+   §4.1），把这些变量写进它的 `settings.json.env` 块。claude 启动后会把
+   `settings.json.env` 应用到自己的进程环境，再传给它 spawn 的一切子进程
+   （Bash 工具、MCP server、Workflow 后台 daemon），所以只需注入一个
+   `CLAUDE_CONFIG_DIR=<该目录>` 即可，不需要也不应该再单独注入
+   `ANTHROPIC_BASE_URL` 等值（两处维护同一份数据是冗余，且直接注入进程环境
+   那份只有前台 session 能看到，Workflow 子 agent 看不到）。
+   `EnvMap()` 为空的 plan profile（全空）跳过这一步，直接用真实 `~/.claude`。
 3. `exec.LookPath("claude")` 找二进制，找不到 → 明确报错。
 4. `exec.Command` 启动 claude，**继承 stdin/stdout/stderr**（claude 是交互式 TUI，
    终端完全交给它），第一个 profile 名之后的所有参数原样透传。
+
+### 4.1 每 profile 独立 `CLAUDE_CONFIG_DIR`（解决 Workflow 鉴权问题）
+
+**背景**：Claude Code 的 Workflow/Task 子 agent 由后台 daemon 承载，其鉴权/env
+解析更依赖 `CLAUDE_CONFIG_DIR/settings.json` 的 `env` 块，而非直接注入到启动
+进程环境的 `ANTHROPIC_*` 变量（这条路径在后台 daemon 场景下不可靠，官方
+changelog 里能查到多条相关修复）。同时用户会在同一台机器上并发跑多个不同
+供应商的 session，这些 session 的后台状态（daemon socket、session 记录等）不能
+互相串用。
+
+**方案**：每个非空 profile 对应一个镜像目录 `~/.ccenv/claudehome/<name>/`，每次
+`ccenv <name>` 启动时刷新（不是只建一次）：
+
+- **共享条目**（软链接/junction 回真实 `~/.claude`）：`plugins`、`skills`、
+  `commands`、`agents`、`hooks`、`teams`、`projects`、记忆/CLAUDE.md、
+  `.mcp.json`、凭据文件等——即真实 `~/.claude` 下除以下两类之外的所有条目。
+  跨平台链接方式：macOS/Linux 用 `os.Symlink`；Windows 为避免需要开发者模式/
+  管理员权限，目录用 `mklink /J`（junction），文件用硬链接（`os.Link`）。
+- **运行时状态条目**（**不链接**，各 profile 独立新建）：`daemon`、
+  `daemon.log`、`sessions`、`session-data`、`session-env`、
+  `shell-snapshots`、`jobs`、`debug`、`tmp`。这些是绑定到具体运行中
+  daemon/session 的状态，链接会导致并发跑的不同 profile 共享同一个 daemon，
+  可能让 Workflow 用错供应商。claude 会在镜像目录里按需自己建。
+- **`settings.json`**（**不链接，重新生成**）：以真实 `~/.claude/settings.json`
+  为底本，清空其中 ccenv 管理的 env key（`ANTHROPIC_BASE_URL` /
+  `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` /
+  `ANTHROPIC_DEFAULT_{HAIKU,SONNET,OPUS}_MODEL` /
+  `CLAUDE_CODE_AUTO_COMPACT_WINDOW`），再把当前 profile 的值写回，其余
+  `env` 条目和所有非 `env` 顶层字段原样保留。这样每个 profile 的镜像
+  `settings.json` 都反映"真实设置 + 该 profile 自己的供应商配置"，Workflow
+  子 agent 读到的就是正确的 endpoint。
+
+对应实现：`internal/claudehome`（镜像目录构建 + 平台特定链接）、
+`internal/claudecfg.MaterializeProviderSettings`（settings.json 生成）、
+`internal/profile.EnvMap` / `ManagedEnvKeys`（profile → env 的唯一权威来源）。
+`launcher.Launch` 只在有变量要注入时算出 `len(EnvMap()) > 0` 来决定要不要建
+镜像目录 + 设 `CLAUDE_CONFIG_DIR`，不再把 `EnvMap()` 的内容单独拼进
+`cmd.Env`——那样会造成两处维护同一份数据。
 
 ## 5. add / edit 交互流程
 
@@ -150,10 +188,11 @@ auth_token = "sk-ant-xxx"
 ├── main.go                 # cobra root + 入口路由
 ├── internal/
 │   ├── config/             # TOML 读写、profile CRUD
-│   ├── profile/            # profile 数据模型
+│   ├── profile/            # profile 数据模型 + EnvMap（唯一权威 env 定义）
 │   ├── launcher/           # 环境变量注入 + 启动 claude
 │   ├── models/             # /v1/models 拉取解析
-│   └── claudecfg/          # yolo: ~/.claude/settings.json 增量写
+│   ├── claudecfg/          # ~/.claude/settings.json 增量写（yolo + provider env 生成）
+│   └── claudehome/         # 每 profile 独立 CLAUDE_CONFIG_DIR 镜像目录（见 §4.1）
 └── cmd/                    # cobra 各子命令 (add/edit/ls/rm/yolo + 默认启动)
 ```
 
