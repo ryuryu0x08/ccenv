@@ -28,6 +28,25 @@ func NewRoot() *cobra.Command {
 	return root
 }
 
+// verboseFlags are the leading ccenv-global flags that enable launch
+// diagnostics. They are consumed by StripGlobalFlags before the profile name
+// so they are never forwarded to claude.
+var verboseFlags = map[string]bool{"--verbose": true, "-v": true}
+
+// StripGlobalFlags consumes ccenv's own leading flags from args (currently just
+// --verbose/-v) and returns whether verbose was set plus the remaining args.
+// Only flags appearing before the first non-flag token (the profile name or
+// subcommand) are consumed; the first unrecognized token stops scanning so
+// subcommand flags and claude pass-through args are left untouched.
+func StripGlobalFlags(args []string) (verbose bool, rest []string) {
+	i := 0
+	for i < len(args) && verboseFlags[args[i]] {
+		verbose = true
+		i++
+	}
+	return verbose, args[i:]
+}
+
 // IsReservedIn reports whether name matches a registered subcommand (or its
 // aliases) of root, or the built-in help/completion commands. This is the
 // single source of truth for routing: anything reserved goes through cobra,

@@ -56,6 +56,33 @@ func TestLinkSharedSkipsRuntimeStateAndSettings(t *testing.T) {
 	}
 }
 
+// TestLinkSharedSkipsNestedDotClaude verifies that a ".claude" entry inside
+// the real ~/.claude is never linked into the mirror. Linking it would drop a
+// ".claude" dir at the mirror root, turning the mirror into a project root
+// whose .claude/settings.json (project scope) would silently override the
+// profile's own user-scope settings.json.
+func TestLinkSharedSkipsNestedDotClaude(t *testing.T) {
+	realDir := t.TempDir()
+	mirrorDir := t.TempDir()
+
+	if err := os.Mkdir(filepath.Join(realDir, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(realDir, ".claude", "settings.json"), `{"model":"opus"}`)
+	writeFile(t, filepath.Join(realDir, "CLAUDE.md"), "shared memory")
+
+	if err := linkShared(realDir, mirrorDir); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Lstat(filepath.Join(mirrorDir, ".claude")); err == nil {
+		t.Error("nested .claude must not be linked into the mirror (would shadow profile settings)")
+	}
+	if _, err := os.Lstat(filepath.Join(mirrorDir, "CLAUDE.md")); err != nil {
+		t.Errorf("normal shared entry should still be linked: %v", err)
+	}
+}
+
 // TestLinkSharedReflectsUpdatesToReal verifies that re-running linkShared
 // (as Prepare does on every launch) picks up new content written to the real
 // dir after the mirror already exists, since the mirror must track shared

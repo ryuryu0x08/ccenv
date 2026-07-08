@@ -42,6 +42,14 @@ var runtimeStateEntries = map[string]bool{
 // settingsFileName is excluded from linking; it is regenerated per profile.
 const settingsFileName = "settings.json"
 
+// nestedConfigDirName is a ".claude" entry that may exist inside the real
+// ~/.claude. Linking it would place a ".claude" directory at the mirror root,
+// turning the mirror dir itself into a project root: claude would then read
+// mirror/.claude/settings.json as project-scope config (higher precedence than
+// the mirror's own user-scope settings.json), silently overriding the profile.
+// It is never linked.
+const nestedConfigDirName = ".claude"
+
 // Dir returns the mirror directory for the given profile name:
 // ~/.ccenv/claudehome/<name>.
 func Dir(name string) (string, error) {
@@ -55,7 +63,8 @@ func Dir(name string) (string, error) {
 // Prepare builds (or refreshes) the mirror directory for profile name so it
 // can be used as CLAUDE_CONFIG_DIR, and returns its path. It links every
 // shared entry from the real ~/.claude into the mirror (skipping
-// runtimeStateEntries and settingsFileName), then materializes
+// runtimeStateEntries, settingsFileName, and nestedConfigDirName), then
+// materializes
 // settings.json with p's provider env applied on top of the real
 // settings.json's other settings.
 func Prepare(name string, p profile.Profile) (string, error) {
@@ -84,8 +93,9 @@ func Prepare(name string, p profile.Profile) (string, error) {
 }
 
 // linkShared re-links mirrorDir's shared entries to match realDir: every
-// entry present in realDir (except runtimeStateEntries and settingsFileName)
-// gets a link in mirrorDir, replacing whatever was there before. Entries in
+// entry present in realDir (except runtimeStateEntries, settingsFileName, and
+// nestedConfigDirName) gets a link in mirrorDir, replacing whatever was there
+// before. Entries in
 // mirrorDir that no longer exist in realDir are left alone (defensive; ccenv
 // never wrote them there since only listed entries are ever linked).
 func linkShared(realDir, mirrorDir string) error {
@@ -95,7 +105,7 @@ func linkShared(realDir, mirrorDir string) error {
 	}
 	for _, e := range entries {
 		name := e.Name()
-		if runtimeStateEntries[name] || name == settingsFileName {
+		if runtimeStateEntries[name] || name == settingsFileName || name == nestedConfigDirName {
 			continue
 		}
 		src := filepath.Join(realDir, name)
